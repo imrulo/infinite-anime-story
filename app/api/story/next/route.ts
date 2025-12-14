@@ -17,12 +17,12 @@ const dailyRequestCount: { [date: string]: number } = {};
 function checkRateLimit(): { allowed: boolean; message?: string } {
   const now = Date.now();
   const oneMinuteAgo = now - 60 * 1000;
-  
+
   // Clean old timestamps
   while (requestTimestamps.length > 0 && requestTimestamps[0] < oneMinuteAgo) {
     requestTimestamps.shift();
   }
-  
+
   // Check per-minute limit
   if (requestTimestamps.length >= FREE_TIER_RPM_LIMIT) {
     return {
@@ -30,22 +30,22 @@ function checkRateLimit(): { allowed: boolean; message?: string } {
       message: `Rate limit exceeded. Free tier allows ${FREE_TIER_RPM_LIMIT} requests per minute. Please wait a moment.`
     };
   }
-  
+
   // Check daily limit
   const today = new Date().toISOString().split('T')[0];
   const todayCount = dailyRequestCount[today] || 0;
-  
+
   if (todayCount >= FREE_TIER_DAILY_LIMIT) {
     return {
       allowed: false,
       message: `Daily limit reached. Free tier allows ${FREE_TIER_DAILY_LIMIT} requests per day. Please try again tomorrow.`
     };
   }
-  
+
   // Record this request
   requestTimestamps.push(now);
   dailyRequestCount[today] = todayCount + 1;
-  
+
   return { allowed: true };
 }
 
@@ -144,7 +144,7 @@ Respond with ONLY the JSON object, no markdown, no code blocks, no explanation.`
 async function generateStory(request: StoryRequest, retryCount = 0, fixInstruction = ""): Promise<StoryResponse> {
   try {
     console.log("[generateStory] Starting, retryCount:", retryCount);
-    
+
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error("GEMINI_API_KEY environment variable is not set");
@@ -159,26 +159,30 @@ async function generateStory(request: StoryRequest, retryCount = 0, fixInstructi
       console.error("[generateStory] Failed to create client:", initError);
       throw new Error(`Failed to initialize Gemini client: ${initError.message}`);
     }
-  
-  // FREE TIER ONLY - Using models with best free tier limits
-  // IMPORTANT: Only using free tier models to avoid any charges
-  // Gemini 1.5 Flash has: 15 RPM, 1M TPM in free tier
-  // Gemini 2.5 models have very limited free tier (removed from many accounts)
-  const modelNames = [
-    "gemini-1.5-flash",      // Best free tier: 15 RPM, 1M TPM
-    "gemini-1.5-flash-002",  // Alternative version
-    "gemini-1.5-pro"         // Fallback (if available in free tier)
-  ];
 
-  const historyText = request.history
-    .slice(-12)
-    .map((h, i) => {
-      const choiceText = h.choiceId ? `\n[Chose ${h.choiceId}: ${h.beat.choices.find(c => c.id === h.choiceId)?.text || ""}]` : "";
-      return `Beat ${i + 1}: ${h.beat.title}\n${h.beat.text}${choiceText}`;
-    })
-    .join("\n\n---\n\n");
+    // FREE TIER ONLY - Using models with best free tier limits
+    // IMPORTANT: Only using free tier models to avoid any charges
+    // Gemini 1.5 Flash has: 15 RPM, 1M TPM in free tier
+    // Gemini 2.5 models have very limited free tier (removed from many accounts)
+    // Updated model list based on available models for the user's key
+    // This key seems to have access to 2.x models but not 1.5
+    const modelNames = [
+      "gemini-2.5-flash",      // Newest flash model
+      "gemini-2.0-flash",      // Next gen flash
+      "gemini-flash-latest",   // Alias for latest flash
+      "gemini-1.5-flash",      // Fallback
+      "gemini-1.5-flash-002"
+    ];
 
-  const userPrompt = `Dream: "${request.dream}"
+    const historyText = request.history
+      .slice(-12)
+      .map((h, i) => {
+        const choiceText = h.choiceId ? `\n[Chose ${h.choiceId}: ${h.beat.choices.find(c => c.id === h.choiceId)?.text || ""}]` : "";
+        return `Beat ${i + 1}: ${h.beat.title}\n${h.beat.text}${choiceText}`;
+      })
+      .join("\n\n---\n\n");
+
+    const userPrompt = `Dream: "${request.dream}"
 
 ${request.history.length > 0 ? `Story so far:\n${historyText}\n\n` : ""}Current Story Panel:
 - Key Items: ${request.storyPanel.keyItems.map(i => `${i.name} (${i.note})`).join(", ") || "None"}
@@ -193,120 +197,120 @@ ${fixInstruction}
 
 Generate the next story beat following all rules. Output STRICT JSON ONLY.`;
 
-  const fullPrompt = `${SYSTEM_PROMPT}\n\n${userPrompt}`;
+    const fullPrompt = `${SYSTEM_PROMPT}\n\n${userPrompt}`;
 
-  // Try each model until one works
-  let lastError: Error | null = null;
-  let lastErrorDetails: any = null;
-  
-  for (const modelName of modelNames) {
-    try {
-      console.log(`[INFO] Attempting to use model: ${modelName}`);
-      const model = genAI.getGenerativeModel({ model: modelName });
-      console.log(`[INFO] Model initialized, generating content...`);
-      const result = await model.generateContent(fullPrompt);
-      const response = await result.response;
-      const text = response.text();
-      console.log(`[INFO] Received response from ${modelName}, length: ${text?.length || 0}`);
+    // Try each model until one works
+    let lastError: Error | null = null;
+    let lastErrorDetails: any = null;
 
-      if (!text) {
-        throw new Error("No content in Gemini response");
-      }
-
-      let parsed: unknown;
+    for (const modelName of modelNames) {
       try {
-        // Try to extract JSON if wrapped in markdown code blocks
-        let cleanedText = text.trim();
-        // Remove markdown code blocks if present
-        if (cleanedText.startsWith("```")) {
-          cleanedText = cleanedText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+        console.log(`[INFO] Attempting to use model: ${modelName}`);
+        const model = genAI.getGenerativeModel({ model: modelName });
+        console.log(`[INFO] Model initialized, generating content...`);
+        const result = await model.generateContent(fullPrompt);
+        const response = await result.response;
+        const text = response.text();
+        console.log(`[INFO] Received response from ${modelName}, length: ${text?.length || 0}`);
+
+        if (!text) {
+          throw new Error("No content in Gemini response");
         }
-        // Extract JSON object
-        const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
-        parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(cleanedText);
-      } catch (error) {
-        if (retryCount < 1) {
-          // Retry with fix instruction
+
+        let parsed: unknown;
+        try {
+          // Try to extract JSON if wrapped in markdown code blocks
+          let cleanedText = text.trim();
+          // Remove markdown code blocks if present
+          if (cleanedText.startsWith("```")) {
+            cleanedText = cleanedText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+          }
+          // Extract JSON object
+          const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
+          parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(cleanedText);
+        } catch (error) {
+          if (retryCount < 1) {
+            // Retry with fix instruction
+            return generateStory(request, retryCount + 1, "\n\nIMPORTANT: The previous response was invalid JSON. Fix it and output ONLY valid JSON matching the schema, no markdown, no code blocks, no explanation.");
+          }
+          throw new Error(`Failed to parse JSON response: ${error}`);
+        }
+
+        const validated = StoryResponseSchema.parse(parsed);
+        console.log(`Successfully generated story using model: ${modelName}`);
+        return validated;
+      } catch (error: any) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorString = JSON.stringify(error, Object.getOwnPropertyNames(error));
+        const errorName = error instanceof Error ? error.name : "";
+        const errorStatus = error?.status || error?.statusCode || error?.response?.status || "";
+
+        lastError = error instanceof Error ? error : new Error(String(error));
+        lastErrorDetails = {
+          message: errorMessage,
+          name: errorName,
+          status: errorStatus,
+          model: modelName,
+          fullError: errorString
+        };
+
+        console.error(`[ERROR] Model ${modelName} failed:`, {
+          message: errorMessage,
+          status: errorStatus,
+          name: errorName
+        });
+
+        // Check for model not found errors (404, not found, not supported)
+        // GoogleGenerativeAI errors can have different formats
+        const isModelNotFoundError =
+          errorStatus === 404 ||
+          String(errorStatus).includes("404") ||
+          errorMessage.includes("404") ||
+          errorMessage.includes("not found") ||
+          errorMessage.includes("Not Found") ||
+          errorMessage.includes("not supported") ||
+          errorMessage.includes("is not found for API version") ||
+          errorMessage.includes("is not found for API") ||
+          errorString.includes("404") ||
+          errorString.includes("not found") ||
+          errorName === "GoogleGenerativeAI Error";
+
+        if (isModelNotFoundError) {
+          console.log(`[FALLBACK] ${modelName} not available (404/not found). Trying next model...`);
+          const nextIndex = modelNames.indexOf(modelName);
+          if (nextIndex < modelNames.length - 1) {
+            continue; // Try next model
+          } else {
+            console.error(`[FATAL] All models exhausted. Last error:`, lastErrorDetails);
+            throw new Error(`No available Gemini models. Tried: ${modelNames.join(", ")}. Last error: ${errorMessage.substring(0, 200)}`);
+          }
+        }
+
+        // For other errors (API key, quota, etc.), throw immediately
+        if (error instanceof Error) {
+          if (error.message.includes("API key") || error.message.includes("API_KEY_NOT_FOUND") || error.message.includes("PERMISSION_DENIED")) {
+            throw new Error("GEMINI_API_KEY is invalid or unauthorized. Check your API key in .env.local and Vercel environment variables.");
+          }
+          // FREE TIER PROTECTION: Handle quota/rate limit errors
+          if (error.message.includes("quota") || error.message.includes("rate limit") || error.message.includes("RESOURCE_EXHAUSTED")) {
+            throw new Error("FREE TIER LIMIT REACHED: You've reached the free tier quota. The app will stop working to prevent any charges. Please wait until the quota resets (usually daily).");
+          }
+          // FREE TIER PROTECTION: Handle billing errors
+          if (error.message.includes("billing") || error.message.includes("payment") || error.message.includes("BILLING_NOT_ENABLED")) {
+            throw new Error("FREE TIER ONLY: Billing is not enabled (as requested). The app uses only free tier models. If you see this error, the free quota may be exhausted.");
+          }
+        }
+
+        // If it's a JSON parsing error and we haven't retried, retry with fix instruction
+        if (retryCount < 1 && error instanceof Error && error.message.includes("parse")) {
           return generateStory(request, retryCount + 1, "\n\nIMPORTANT: The previous response was invalid JSON. Fix it and output ONLY valid JSON matching the schema, no markdown, no code blocks, no explanation.");
         }
-        throw new Error(`Failed to parse JSON response: ${error}`);
-      }
 
-      const validated = StoryResponseSchema.parse(parsed);
-      console.log(`Successfully generated story using model: ${modelName}`);
-      return validated;
-    } catch (error: any) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorString = JSON.stringify(error, Object.getOwnPropertyNames(error));
-      const errorName = error instanceof Error ? error.name : "";
-      const errorStatus = error?.status || error?.statusCode || error?.response?.status || "";
-      
-      lastError = error instanceof Error ? error : new Error(String(error));
-      lastErrorDetails = {
-        message: errorMessage,
-        name: errorName,
-        status: errorStatus,
-        model: modelName,
-        fullError: errorString
-      };
-      
-      console.error(`[ERROR] Model ${modelName} failed:`, {
-        message: errorMessage,
-        status: errorStatus,
-        name: errorName
-      });
-      
-      // Check for model not found errors (404, not found, not supported)
-      // GoogleGenerativeAI errors can have different formats
-      const isModelNotFoundError = 
-        errorStatus === 404 ||
-        String(errorStatus).includes("404") ||
-        errorMessage.includes("404") || 
-        errorMessage.includes("not found") ||
-        errorMessage.includes("Not Found") ||
-        errorMessage.includes("not supported") ||
-        errorMessage.includes("is not found for API version") ||
-        errorMessage.includes("is not found for API") ||
-        errorString.includes("404") ||
-        errorString.includes("not found") ||
-        errorName === "GoogleGenerativeAI Error";
-      
-      if (isModelNotFoundError) {
-        console.log(`[FALLBACK] ${modelName} not available (404/not found). Trying next model...`);
-        const nextIndex = modelNames.indexOf(modelName);
-        if (nextIndex < modelNames.length - 1) {
-          continue; // Try next model
-        } else {
-          console.error(`[FATAL] All models exhausted. Last error:`, lastErrorDetails);
-          throw new Error(`No available Gemini models. Tried: ${modelNames.join(", ")}. Last error: ${errorMessage.substring(0, 200)}`);
-        }
+        // Otherwise, throw the error
+        throw error;
       }
-      
-      // For other errors (API key, quota, etc.), throw immediately
-      if (error instanceof Error) {
-        if (error.message.includes("API key") || error.message.includes("API_KEY_NOT_FOUND") || error.message.includes("PERMISSION_DENIED")) {
-          throw new Error("GEMINI_API_KEY is invalid or unauthorized. Check your API key in .env.local and Vercel environment variables.");
-        }
-        // FREE TIER PROTECTION: Handle quota/rate limit errors
-        if (error.message.includes("quota") || error.message.includes("rate limit") || error.message.includes("RESOURCE_EXHAUSTED")) {
-          throw new Error("FREE TIER LIMIT REACHED: You've reached the free tier quota. The app will stop working to prevent any charges. Please wait until the quota resets (usually daily).");
-        }
-        // FREE TIER PROTECTION: Handle billing errors
-        if (error.message.includes("billing") || error.message.includes("payment") || error.message.includes("BILLING_NOT_ENABLED")) {
-          throw new Error("FREE TIER ONLY: Billing is not enabled (as requested). The app uses only free tier models. If you see this error, the free quota may be exhausted.");
-        }
-      }
-      
-      // If it's a JSON parsing error and we haven't retried, retry with fix instruction
-      if (retryCount < 1 && error instanceof Error && error.message.includes("parse")) {
-        return generateStory(request, retryCount + 1, "\n\nIMPORTANT: The previous response was invalid JSON. Fix it and output ONLY valid JSON matching the schema, no markdown, no code blocks, no explanation.");
-      }
-      
-      // Otherwise, throw the error
-      throw error;
     }
-  }
-  
+
     // If all models failed, throw the last error
     throw lastError || new Error("All Gemini models failed. Please check your API key and model availability.");
   } catch (error: any) {
@@ -322,7 +326,7 @@ export async function POST(req: NextRequest) {
     if (!rateLimitCheck.allowed) {
       console.warn("[POST] Rate limit exceeded:", rateLimitCheck.message);
       return NextResponse.json(
-        { 
+        {
           error: "Rate limit exceeded",
           message: rateLimitCheck.message,
           freeTierLimit: true
@@ -360,31 +364,31 @@ export async function POST(req: NextRequest) {
     console.error("[POST] Error name:", error?.name);
     console.error("[POST] Error message:", error?.message);
     console.error("[POST] Error stack:", error?.stack?.substring(0, 500));
-    
+
     // Try to stringify error for more details
     try {
       console.error("[POST] Error details:", JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
     } catch (stringifyError) {
       console.error("[POST] Could not stringify error");
     }
-    
+
     const errorMessage = error instanceof Error ? error.message : String(error);
-    
+
     // Provide helpful error messages for common issues
     if (errorMessage.includes("GEMINI_API_KEY") || errorMessage.includes("API key")) {
       return NextResponse.json(
-        { 
+        {
           error: "Missing or invalid GEMINI_API_KEY. Please check your .env.local file and Vercel environment variables.",
           details: errorMessage
         },
         { status: 500 }
       );
     }
-    
+
     // FREE TIER PROTECTION: Handle quota/rate limit errors
     if (errorMessage.includes("quota") || errorMessage.includes("rate limit") || errorMessage.includes("RESOURCE_EXHAUSTED")) {
       return NextResponse.json(
-        { 
+        {
           error: "FREE TIER LIMIT REACHED",
           message: "You've reached the free tier quota. The app will stop working to prevent any charges. Please wait until the quota resets (usually daily).",
           freeTierLimit: true,
@@ -393,11 +397,11 @@ export async function POST(req: NextRequest) {
         { status: 429 }
       );
     }
-    
+
     // FREE TIER PROTECTION: Handle billing errors
     if (errorMessage.includes("billing") || errorMessage.includes("payment") || errorMessage.includes("BILLING_NOT_ENABLED")) {
       return NextResponse.json(
-        { 
+        {
           error: "FREE TIER ONLY",
           message: "Billing is not enabled (as requested). The app uses only free tier models. If you see this error, the free quota may be exhausted.",
           freeTierLimit: true,
@@ -406,19 +410,19 @@ export async function POST(req: NextRequest) {
         { status: 403 }
       );
     }
-    
+
     if (errorMessage.includes("No available Gemini models") || errorMessage.includes("All Gemini models failed")) {
       return NextResponse.json(
-        { 
+        {
           error: "No available Gemini models for your API key. Please check which models are available in your Google AI Studio account.",
           details: errorMessage
         },
         { status: 500 }
       );
     }
-    
+
     return NextResponse.json(
-      { 
+      {
         error: "Failed to generate story",
         details: errorMessage,
         type: error?.name || "UnknownError"
