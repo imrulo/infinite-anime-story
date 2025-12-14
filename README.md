@@ -18,7 +18,7 @@ An original branching narrative experience where your choices shape an epic shō
 - **TypeScript**
 - **Tailwind CSS**
 - **Google Gemini API** (server-side story generation via @google/generative-ai)
-  - **FREE TIER ONLY**: Uses only free tier models (gemini-1.5-flash)
+  - **FREE TIER ONLY**: Uses free tier models (gemini-2.5-flash, gemini-2.0-flash, gemini-1.5-flash)
   - **Rate limiting**: Built-in protection to stay within free tier limits
 - **Pollinations** (client-side image generation)
 
